@@ -11,7 +11,7 @@ alembic==1.13.1  # Migrations
 
 
 passlib==1.7.4
-python-jose==3.3.0  # JWT tokens
+python-jose==3.4.0  # JWT tokens
 oauthlib==3.2.2
 
 
