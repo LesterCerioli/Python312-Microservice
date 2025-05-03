@@ -1,0 +1,88 @@
+name: Podcast Product API CI/CD
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  PYTHON_VERSION: "3.12"
+  DATABASE_URL: "postgresql://test:test@localhost:5432/test"
+
+jobs:
+  quality-checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov black flake8 bandit mypy sqlalchemy psycopg2-binary
+
+    - name: Validate database models
+      run: |
+        python -c "from app.database import Base; Base.metadata.create_all()"
+        
+    - name: Run linting and formatting
+      run: |
+        black --check --diff app/
+        flake8 app/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 app/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Run security scan
+      run: |
+        bandit -r app/ -x app/tests/
+
+    - name: Run type checking
+      run: |
+        mypy app/ --ignore-missing-imports
+
+    - name: Run tests with coverage
+      run: |
+        pytest --cov=app --cov-report=xml
+      
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+
+  deploy:
+    needs: quality-checks
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        
+    - name: Verify production DB connection
+      env:
+        PROD_DB_URL: ${{ secrets.PROD_DB_URL }}
+      run: |
+        python -c "import os; print('Production DB configured:', 'postgresql://' in os.getenv('PROD_DB_URL', ''))"
